@@ -1,0 +1,155 @@
+name: Build personal nixpkgs
+run-name: "personal @ ${{ inputs.state }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      state:
+        description: Personal nixpkgs state
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nixpkgs-personal
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    env:
+      GH_TOKEN: ${{ github.token }}
+      UPSTREAM_REPO: NixOS/nixpkgs
+      PR_AUTHOR: nolight132
+
+    steps:
+      - name: Checkout nixos-unstable
+        uses: actions/checkout@v6
+        with:
+          repository: NixOS/nixpkgs
+          ref: nixos-unstable
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Enable Cachix
+        uses: cachix/cachix-action@v17
+        with:
+          name: nixpkgs-nolight
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+
+      - name: Install nixpkgs-review
+        run: nix profile add .#nixpkgs-review
+
+      - name: Compose personal
+        id: compose
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name "nixpkgs-ci"
+          git config user.email "nixpkgs-ci@users.noreply.github.com"
+
+          git fetch origin master nixos-unstable --no-tags
+
+          base_sha="$(git rev-parse HEAD)"
+
+          mapfile -t open_prs < <(
+            gh pr list \
+              --repo "$UPSTREAM_REPO" \
+              --author "$PR_AUTHOR" \
+              --base master \
+              --state open \
+              --limit 200 \
+              --json number \
+              --jq '.[].number'
+          )
+
+          mapfile -t merged_prs < <(
+            gh api \
+              --method GET \
+              search/issues \
+              -f q="repo:${UPSTREAM_REPO} is:pr is:merged author:${PR_AUTHOR} base:master" \
+              -f per_page=100 \
+              -f sort=updated \
+              -f order=desc \
+              --jq '.items[].number'
+          )
+
+          wanted=()
+
+          for pr in "${merged_prs[@]}"; do
+            pr_json="$(
+              gh api "repos/${UPSTREAM_REPO}/pulls/${pr}"
+            )"
+
+            merge_sha="$(
+              jq -r '.merge_commit_sha // empty' <<< "$pr_json"
+            )"
+
+            [[ -z "$merge_sha" ]] && continue
+
+            if git merge-base --is-ancestor "$merge_sha" "$base_sha"; then
+              continue
+            fi
+
+            wanted+=("$pr")
+          done
+
+          wanted+=("${open_prs[@]}")
+
+          mapfile -t wanted < <(
+            printf '%s\n' "${wanted[@]}" \
+              | sed '/^$/d' \
+              | sort -n -u
+          )
+
+          for pr in "${wanted[@]}"; do
+            patch="$RUNNER_TEMP/pr-${pr}.diff"
+
+            gh pr diff \
+              "$pr" \
+              --repo "$UPSTREAM_REPO" \
+              > "$patch"
+
+            [[ ! -s "$patch" ]] && continue
+
+            if git apply --reverse --check "$patch" >/dev/null 2>&1; then
+              continue
+            fi
+
+            git apply --3way --index "$patch"
+            git commit -m "Apply NixOS/nixpkgs#${pr}"
+          done
+
+          git reset --soft "$base_sha"
+
+          if git diff --cached --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            git commit -m "personal: ${{ inputs.state }}"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build personal
+        if: steps.compose.outputs.changed == 'true'
+        run: |
+          nixpkgs-review rev HEAD \
+            --no-shell \
+            --print-result
+
+      - name: Publish personal
+        env:
+          GH_TOKEN: ${{ secrets.NIXPKGS_PAT }}
+        run: |
+          gh auth setup-git
+          git remote add fork https://github.com/nolight132/nixpkgs.git
+          git push --force fork HEAD:refs/heads/personal
