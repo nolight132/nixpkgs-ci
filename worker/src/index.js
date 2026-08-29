@@ -9,6 +9,14 @@ export default {
     if (new URL(request.url).pathname !== "/tick") {
       return new Response("nixpkgs-ci watchdog", { status: 200 });
     }
+
+    const secret = env.TICK_SECRET;
+    const offered = request.headers.get("authorization");
+
+    if (!secret || offered !== `Bearer `) {
+      return new Response("not found", { status: 404 });
+    }
+
     return new Response(JSON.stringify(await tick(env), null, 1), {
       headers: { "content-type": "application/json" },
     });
