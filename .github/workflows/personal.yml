@@ -154,6 +154,7 @@ jobs:
             git commit -m "Apply NixOS/nixpkgs#${pr}"
           done
 
+          git reset --soft "$base_sha"
 
           echo "base=$base_sha" >> "$GITHUB_OUTPUT"
 
