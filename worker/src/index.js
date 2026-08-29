@@ -13,7 +13,7 @@ export default {
     const secret = env.TICK_SECRET;
     const offered = request.headers.get("authorization");
 
-    if (!secret || offered !== `Bearer `) {
+    if (!secret || offered !== `Bearer ${secret}`) {
       return new Response("not found", { status: 404 });
     }
 

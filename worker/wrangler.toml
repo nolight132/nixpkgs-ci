@@ -12,4 +12,4 @@ FLOOR_MINUTES = "15"
 
 [[kv_namespaces]]
 binding = "STATE"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"
+id = "16e61c85f6904d2ca2f53f035dc52415"
