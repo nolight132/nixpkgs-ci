@@ -154,7 +154,8 @@ jobs:
             git commit -m "Apply NixOS/nixpkgs#${pr}"
           done
 
-          git reset --soft "$base_sha"
+
+          echo "base=$base_sha" >> "$GITHUB_OUTPUT"
 
           if git diff --cached --quiet; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
@@ -163,13 +164,73 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Build personal
+      - name: Check cache
+        id: cache
         if: steps.compose.outputs.changed == 'true'
+        shell: bash
+        env:
+          BASE_SHA: ${{ steps.compose.outputs.base }}
+        run: |
+          set -euo pipefail
+
+          attrs=()
+
+          while IFS= read -r file; do
+            [[ -z "$file" ]] && continue
+
+            if [[ "$file" =~ ^pkgs/by-name/[^/]+/([^/]+)/ ]]; then
+              attrs+=("${BASH_REMATCH[1]}")
+            else
+              echo "unmapped path: $file, falling back to a full review"
+              echo "cached=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done < <(git diff --name-only "$BASE_SHA" HEAD)
+
+          mapfile -t attrs < <(
+            printf '%s\n' "${attrs[@]:-}" \
+              | sed '/^$/d' \
+              | sort -u
+          )
+
+          if [[ ${#attrs[@]} -eq 0 ]]; then
+            echo "cached=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "attributes: ${attrs[*]}"
+
+          dry="$RUNNER_TEMP/dry.log"
+
+          if ! nix build \
+            --dry-run \
+            --no-link \
+            --extra-experimental-features nix-command \
+            -f . "${attrs[@]}" \
+            > "$dry" 2>&1
+          then
+            cat "$dry"
+            echo "dry run failed, falling back to a full review"
+            echo "cached=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          cat "$dry"
+
+          if grep -q "will be built" "$dry"; then
+            echo "cached=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "cached=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build personal
+        if: steps.compose.outputs.changed == 'true' && steps.cache.outputs.cached != 'true'
         run: |
           nixpkgs-review rev \
             --branch nixos-unstable \
             --no-shell \
             --print-result \
+            --num-eval-workers 3 \
             HEAD
 
       - name: Publish personal

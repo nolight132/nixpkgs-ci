@@ -97,6 +97,7 @@ jobs:
             --no-shell \
             --print-result \
             --pr-json="$PR_JSON" \
+            --num-eval-workers 3 \
             "${{ inputs.pr }}"
 
       - name: Refresh watcher
