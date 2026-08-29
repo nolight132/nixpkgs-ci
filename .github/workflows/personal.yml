@@ -142,9 +142,11 @@ jobs:
       - name: Build personal
         if: steps.compose.outputs.changed == 'true'
         run: |
-          nixpkgs-review rev HEAD \
+          nixpkgs-review rev \
+            --branch nixos-unstable \
             --no-shell \
-            --print-result
+            --print-result \
+            HEAD
 
       - name: Publish personal
         env:
