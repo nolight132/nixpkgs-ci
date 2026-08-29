@@ -9,7 +9,7 @@ on:
         required: true
         type: string
       prs:
-        description: Verified open PRs as number:sha, comma separated
+        description: Open PRs as number:sha, comma separated
         required: false
         default: ""
         type: string

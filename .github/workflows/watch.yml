@@ -28,7 +28,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          open_prs="$(
+          prs="$(
             gh pr list \
               --repo "$UPSTREAM_REPO" \
               --author "$PR_AUTHOR" \
@@ -36,43 +36,7 @@ jobs:
               --state open \
               --limit 200 \
               --json number,headRefOid \
-              --jq 'sort_by(.number)[] | [.number, .headRefOid] | @tsv'
-          )"
-
-          build_runs="$(mktemp)"
-
-          gh api --paginate \
-            "repos/${GITHUB_REPOSITORY}/actions/workflows/build.yml/runs?per_page=100" \
-            --jq '.workflow_runs[] | [.display_title, .conclusion] | @tsv' \
-            > "$build_runs"
-
-          verified=()
-
-          while IFS=$'\t' read -r pr sha; do
-            [[ -z "${pr:-}" ]] && continue
-
-            title="PR #${pr} @ ${sha}"
-
-            if grep -Fq "${title}"$'\t'"success" "$build_runs"; then
-              verified+=("${pr}:${sha}")
-              continue
-            fi
-
-            if grep -Fq "${title}"$'\t' "$build_runs"; then
-              continue
-            fi
-
-            gh workflow run build.yml \
-              --repo "$GITHUB_REPOSITORY" \
-              -f pr="$pr" \
-              -f sha="$sha"
-          done <<< "$open_prs"
-
-          prs="$(
-            printf '%s\n' "${verified[@]:-}" \
-              | sed '/^$/d' \
-              | sort -t: -k1,1n -u \
-              | paste -sd, -
+              --jq 'sort_by(.number) | map("\(.number):\(.headRefOid)") | join(",")'
           )"
 
           unstable_sha="$(
@@ -87,6 +51,10 @@ jobs:
               | cut -d' ' -f1
           )"
 
+          echo "unstable: $unstable_sha"
+          echo "open prs: ${prs:-none}"
+          echo "state:    $state"
+
           personal_title="personal @ ${state}"
           personal_runs="$(mktemp)"
 
@@ -95,9 +63,12 @@ jobs:
             --jq '.workflow_runs[].display_title' \
             > "$personal_runs"
 
-          if ! grep -Fxq "$personal_title" "$personal_runs"; then
-            gh workflow run personal.yml \
-              --repo "$GITHUB_REPOSITORY" \
-              -f state="$state" \
-              -f prs="$prs"
+          if grep -Fxq "$personal_title" "$personal_runs"; then
+            echo "already composed, nothing to do"
+            exit 0
           fi
+
+          gh workflow run personal.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            -f state="$state" \
+            -f prs="$prs"
