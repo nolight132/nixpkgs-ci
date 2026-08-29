@@ -70,7 +70,7 @@ jobs:
           )"
 
           state="$(
-            printf '%s\n%s\n' "$unstable_sha" "$open_prs" \
+            printf '%s\n%s\n%s\n' "$GITHUB_SHA" "$unstable_sha" "$open_prs" \
               | sha256sum \
               | cut -d' ' -f1
           )"
