@@ -28,9 +28,6 @@ jobs:
 
     env:
       GH_TOKEN: ${{ github.token }}
-      UPSTREAM_REPO: NixOS/nixpkgs
-      PR: ${{ inputs.pr }}
-      SHA: ${{ inputs.sha }}
 
     steps:
       - name: Read PR
@@ -40,32 +37,36 @@ jobs:
           set -euo pipefail
 
           pr_json="$(
-            gh api "repos/${UPSTREAM_REPO}/pulls/${PR}"
+            gh api "repos/NixOS/nixpkgs/pulls/${{ inputs.pr }}"
           )"
 
           current_sha="$(
             jq -r '.head.sha' <<< "$pr_json"
           )"
 
-          if [[ "$current_sha" != "$SHA" ]]; then
+          if [[ "$current_sha" != "${{ inputs.sha }}" ]]; then
             echo "stale=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          base_sha="$(
-            jq -r '.base.sha' <<< "$pr_json"
+          base_ref="$(
+            jq -r '.base.ref' <<< "$pr_json"
           )"
 
-          echo "base_sha=$base_sha" >> "$GITHUB_OUTPUT"
+          echo "base_ref=$base_ref" >> "$GITHUB_OUTPUT"
 
-      - name: Checkout nixos-unstable
+          {
+            echo 'json<<EOF'
+            echo "$pr_json"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Checkout nixpkgs
         if: steps.pr.outputs.stale != 'true'
         uses: actions/checkout@v6
         with:
           repository: NixOS/nixpkgs
-          ref: nixos-unstable
-          fetch-depth: 0
-          filter: blob:none
+          ref: ${{ steps.pr.outputs.base_ref }}
           persist-credentials: false
 
       - name: Install Nix
@@ -85,53 +86,18 @@ jobs:
         if: steps.pr.outputs.stale != 'true'
         run: nix profile add .#nixpkgs-review
 
-      - name: Apply PR
-        id: apply
-        if: steps.pr.outputs.stale != 'true'
-        shell: bash
-        env:
-          BASE_SHA: ${{ steps.pr.outputs.base_sha }}
-        run: |
-          set -euo pipefail
-
-          git config user.name "nixpkgs-ci"
-          git config user.email "nixpkgs-ci@users.noreply.github.com"
-
-          git fetch \
-            --no-tags \
-            --filter=blob:none \
-            origin "+refs/pull/${PR}/head:refs/pr/${PR}"
-
-          if [[ "$(git rev-parse "refs/pr/${PR}")" != "$SHA" ]]; then
-            echo "stale head after fetch" >&2
-            exit 1
-          fi
-
-          patch="$RUNNER_TEMP/pr-${PR}.diff"
-
-          git diff \
-            --binary \
-            "${BASE_SHA}...${SHA}" \
-            > "$patch"
-
-          if [[ ! -s "$patch" ]] || git apply --reverse --check "$patch" >/dev/null 2>&1; then
-            echo "applied=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          git apply --3way --index "$patch"
-          git commit -m "Apply NixOS/nixpkgs#${PR}"
-
-          echo "applied=true" >> "$GITHUB_OUTPUT"
-
       - name: Build PR
-        if: steps.apply.outputs.applied == 'true'
+        if: steps.pr.outputs.stale != 'true'
+        env:
+          PR_JSON: ${{ steps.pr.outputs.json }}
         run: |
-          nixpkgs-review rev \
-            --branch nixos-unstable \
+          nixpkgs-review pr \
+            --checkout commit \
+            --eval local \
             --no-shell \
             --print-result \
-            HEAD
+            --pr-json="$PR_JSON" \
+            "${{ inputs.pr }}"
 
       - name: Refresh watcher
         if: steps.pr.outputs.stale != 'true'
