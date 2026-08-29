@@ -1,8 +1,8 @@
-name: Watch nixpkgs PRs
+name: Watch nixpkgs
 
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "2-57/5 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: watch-nixpkgs-prs
+  group: watch-nixpkgs
   cancel-in-progress: false
 
 jobs:
@@ -23,39 +23,68 @@ jobs:
       PR_AUTHOR: nolight132
 
     steps:
-      - name: Dispatch new PR revisions
+      - name: Poll
         shell: bash
         run: |
           set -euo pipefail
 
-          runs_file="$(mktemp)"
+          open_prs="$(
+            gh pr list \
+              --repo "$UPSTREAM_REPO" \
+              --author "$PR_AUTHOR" \
+              --base master \
+              --state open \
+              --limit 200 \
+              --json number,headRefOid \
+              --jq 'sort_by(.number)[] | [.number, .headRefOid] | @tsv'
+          )"
+
+          build_runs="$(mktemp)"
 
           gh api --paginate \
             "repos/${GITHUB_REPOSITORY}/actions/workflows/build.yml/runs?per_page=100" \
             --jq '.workflow_runs[].display_title' \
-            > "$runs_file"
+            > "$build_runs"
 
-          gh pr list \
-            --repo "$UPSTREAM_REPO" \
-            --author "$PR_AUTHOR" \
-            --state open \
-            --limit 200 \
-            --json number,headRefOid \
-            --jq '.[] | [.number, .headRefOid] | @tsv' |
           while IFS=$'\t' read -r pr sha; do
+            [[ -z "${pr:-}" ]] && continue
+
             title="PR #${pr} @ ${sha}"
 
-            if grep -Fxq "$title" "$runs_file"; then
-              echo "Already handled: $title"
+            if grep -Fxq "$title" "$build_runs"; then
               continue
             fi
-
-            echo "Dispatching: $title"
 
             gh workflow run build.yml \
               --repo "$GITHUB_REPOSITORY" \
               -f pr="$pr" \
               -f sha="$sha"
 
-            echo "$title" >> "$runs_file"
-          done
+            echo "$title" >> "$build_runs"
+          done <<< "$open_prs"
+
+          unstable_sha="$(
+            gh api \
+              "repos/${UPSTREAM_REPO}/git/ref/heads/nixos-unstable" \
+              --jq '.object.sha'
+          )"
+
+          state="$(
+            printf '%s\n%s\n' "$unstable_sha" "$open_prs" \
+              | sha256sum \
+              | cut -d' ' -f1
+          )"
+
+          personal_title="personal @ ${state}"
+          personal_runs="$(mktemp)"
+
+          gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/personal.yml/runs?per_page=100" \
+            --jq '.workflow_runs[].display_title' \
+            > "$personal_runs"
+
+          if ! grep -Fxq "$personal_title" "$personal_runs"; then
+            gh workflow run personal.yml \
+              --repo "$GITHUB_REPOSITORY" \
+              -f state="$state"
+          fi
