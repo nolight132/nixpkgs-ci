@@ -1,0 +1,104 @@
+name: Build nixpkgs PR
+run-name: "PR #${{ inputs.pr }} @ ${{ inputs.sha }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: nixpkgs PR number
+        required: true
+        type: string
+
+      sha:
+        description: Expected PR head SHA
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nixpkgs-pr-${{ inputs.pr }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    env:
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Read PR
+        id: pr
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          pr_json="$(
+            gh api "repos/NixOS/nixpkgs/pulls/${{ inputs.pr }}"
+          )"
+
+          current_sha="$(
+            jq -r '.head.sha' <<< "$pr_json"
+          )"
+
+          if [[ "$current_sha" != "${{ inputs.sha }}" ]]; then
+            echo "PR moved since this job was dispatched."
+            echo "Expected: ${{ inputs.sha }}"
+            echo "Current:  $current_sha"
+            echo "stale=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          base_ref="$(
+            jq -r '.base.ref' <<< "$pr_json"
+          )"
+
+          echo "base_ref=$base_ref" >> "$GITHUB_OUTPUT"
+
+          {
+            echo 'json<<EOF'
+            echo "$pr_json"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Checkout nixpkgs
+        if: steps.pr.outputs.stale != 'true'
+        uses: actions/checkout@v6
+        with:
+          repository: NixOS/nixpkgs
+          ref: ${{ steps.pr.outputs.base_ref }}
+          persist-credentials: false
+
+      - name: Install Nix
+        if: steps.pr.outputs.stale != 'true'
+        uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Enable Cachix
+        if: steps.pr.outputs.stale != 'true'
+        uses: cachix/cachix-action@v17
+        with:
+          name: nixpkgs-nolight
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+
+      - name: Install nixpkgs-review
+        if: steps.pr.outputs.stale != 'true'
+        run: |
+          nix profile add .#nixpkgs-review
+
+      - name: Build PR
+        if: steps.pr.outputs.stale != 'true'
+        env:
+          PR_JSON: ${{ steps.pr.outputs.json }}
+        run: |
+          nixpkgs-review pr \
+            --checkout commit \
+            --eval local \
+            --no-shell \
+            --print-result \
+            --pr-json="$PR_JSON" \
+            "${{ inputs.pr }}"
