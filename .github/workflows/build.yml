@@ -14,6 +14,7 @@ on:
         type: string
 
 permissions:
+  actions: write
   contents: read
 
 concurrency:
@@ -97,3 +98,9 @@ jobs:
             --print-result \
             --pr-json="$PR_JSON" \
             "${{ inputs.pr }}"
+
+      - name: Refresh watcher
+        if: steps.pr.outputs.stale != 'true'
+        run: |
+          gh workflow run watch.yml \
+            --repo "$GITHUB_REPOSITORY"

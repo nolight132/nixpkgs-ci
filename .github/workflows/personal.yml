@@ -8,6 +8,11 @@ on:
         description: Personal nixpkgs state
         required: true
         type: string
+      prs:
+        description: Verified open PRs as number:sha, comma separated
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -33,6 +38,7 @@ jobs:
           repository: NixOS/nixpkgs
           ref: nixos-unstable
           fetch-depth: 0
+          filter: blob:none
           persist-credentials: false
 
       - name: Install Nix
@@ -52,26 +58,26 @@ jobs:
       - name: Compose personal
         id: compose
         shell: bash
+        env:
+          STATE: ${{ inputs.state }}
+          VERIFIED_PRS: ${{ inputs.prs }}
         run: |
           set -euo pipefail
 
           git config user.name "nixpkgs-ci"
           git config user.email "nixpkgs-ci@users.noreply.github.com"
 
-          git fetch origin master nixos-unstable --no-tags
-
           base_sha="$(git rev-parse HEAD)"
 
-          mapfile -t open_prs < <(
-            gh pr list \
-              --repo "$UPSTREAM_REPO" \
-              --author "$PR_AUTHOR" \
-              --base master \
-              --state open \
-              --limit 200 \
-              --json number \
-              --jq '.[].number'
-          )
+          declare -A head_of=()
+          declare -A base_of=()
+
+          IFS=, read -ra verified <<< "$VERIFIED_PRS"
+
+          for entry in "${verified[@]:-}"; do
+            [[ -z "$entry" ]] && continue
+            head_of["${entry%%:*}"]="${entry##*:}"
+          done
 
           mapfile -t merged_prs < <(
             gh api \
@@ -84,9 +90,9 @@ jobs:
               --jq '.items[].number'
           )
 
-          wanted=()
+          for pr in "${merged_prs[@]:-}"; do
+            [[ -z "$pr" ]] && continue
 
-          for pr in "${merged_prs[@]}"; do
             pr_json="$(
               gh api "repos/${UPSTREAM_REPO}/pulls/${pr}"
             )"
@@ -101,23 +107,41 @@ jobs:
               continue
             fi
 
-            wanted+=("$pr")
+            head_of["$pr"]="$(jq -r '.head.sha' <<< "$pr_json")"
+            base_of["$pr"]="$(jq -r '.base.sha' <<< "$pr_json")"
           done
 
-          wanted+=("${open_prs[@]}")
-
           mapfile -t wanted < <(
-            printf '%s\n' "${wanted[@]}" \
+            printf '%s\n' "${!head_of[@]}" \
               | sed '/^$/d' \
               | sort -n -u
           )
 
-          for pr in "${wanted[@]}"; do
+          for pr in "${wanted[@]:-}"; do
+            [[ -z "$pr" ]] && continue
+
+            head="${head_of[$pr]}"
+
+            if [[ -z "${base_of[$pr]:-}" ]]; then
+              base_of["$pr"]="$(
+                gh api "repos/${UPSTREAM_REPO}/pulls/${pr}" --jq '.base.sha'
+              )"
+            fi
+
+            git fetch \
+              --no-tags \
+              --filter=blob:none \
+              origin "+refs/pull/${pr}/head:refs/pr/${pr}"
+
+            if [[ "$(git rev-parse "refs/pr/${pr}")" != "$head" ]]; then
+              continue
+            fi
+
             patch="$RUNNER_TEMP/pr-${pr}.diff"
 
-            gh pr diff \
-              "$pr" \
-              --repo "$UPSTREAM_REPO" \
+            git diff \
+              --binary \
+              "${base_of[$pr]}...${head}" \
               > "$patch"
 
             [[ ! -s "$patch" ]] && continue
@@ -135,7 +159,7 @@ jobs:
           if git diff --cached --quiet; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
-            git commit -m "personal: ${{ inputs.state }}"
+            git commit -m "personal: ${STATE}"
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 

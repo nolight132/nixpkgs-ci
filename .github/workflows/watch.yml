@@ -43,15 +43,22 @@ jobs:
 
           gh api --paginate \
             "repos/${GITHUB_REPOSITORY}/actions/workflows/build.yml/runs?per_page=100" \
-            --jq '.workflow_runs[].display_title' \
+            --jq '.workflow_runs[] | [.display_title, .conclusion] | @tsv' \
             > "$build_runs"
+
+          verified=()
 
           while IFS=$'\t' read -r pr sha; do
             [[ -z "${pr:-}" ]] && continue
 
             title="PR #${pr} @ ${sha}"
 
-            if grep -Fxq "$title" "$build_runs"; then
+            if grep -Fq "${title}"$'\t'"success" "$build_runs"; then
+              verified+=("${pr}:${sha}")
+              continue
+            fi
+
+            if grep -Fq "${title}"$'\t' "$build_runs"; then
               continue
             fi
 
@@ -59,9 +66,14 @@ jobs:
               --repo "$GITHUB_REPOSITORY" \
               -f pr="$pr" \
               -f sha="$sha"
-
-            echo "$title" >> "$build_runs"
           done <<< "$open_prs"
+
+          prs="$(
+            printf '%s\n' "${verified[@]:-}" \
+              | sed '/^$/d' \
+              | sort -t: -k1,1n -u \
+              | paste -sd, -
+          )"
 
           unstable_sha="$(
             gh api \
@@ -70,7 +82,7 @@ jobs:
           )"
 
           state="$(
-            printf '%s\n%s\n%s\n' "$GITHUB_SHA" "$unstable_sha" "$open_prs" \
+            printf '%s\n%s\n%s\n' "$GITHUB_SHA" "$unstable_sha" "$prs" \
               | sha256sum \
               | cut -d' ' -f1
           )"
@@ -86,5 +98,6 @@ jobs:
           if ! grep -Fxq "$personal_title" "$personal_runs"; then
             gh workflow run personal.yml \
               --repo "$GITHUB_REPOSITORY" \
-              -f state="$state"
+              -f state="$state" \
+              -f prs="$prs"
           fi
