@@ -8,7 +8,6 @@ on:
         description: nixpkgs PR number
         required: true
         type: string
-
       sha:
         description: Expected PR head SHA
         required: true
@@ -45,9 +44,6 @@ jobs:
           )"
 
           if [[ "$current_sha" != "${{ inputs.sha }}" ]]; then
-            echo "PR moved since this job was dispatched."
-            echo "Expected: ${{ inputs.sha }}"
-            echo "Current:  $current_sha"
             echo "stale=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -87,8 +83,7 @@ jobs:
 
       - name: Install nixpkgs-review
         if: steps.pr.outputs.stale != 'true'
-        run: |
-          nix profile add .#nixpkgs-review
+        run: nix profile add .#nixpkgs-review
 
       - name: Build PR
         if: steps.pr.outputs.stale != 'true'
