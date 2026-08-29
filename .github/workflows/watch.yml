@@ -1,0 +1,61 @@
+name: Watch nixpkgs PRs
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: watch-nixpkgs-prs
+  cancel-in-progress: false
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+
+    env:
+      GH_TOKEN: ${{ github.token }}
+      UPSTREAM_REPO: NixOS/nixpkgs
+      PR_AUTHOR: nolight132
+
+    steps:
+      - name: Dispatch new PR revisions
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          runs_file="$(mktemp)"
+
+          gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/build.yml/runs?per_page=100" \
+            --jq '.workflow_runs[].display_title' \
+            > "$runs_file"
+
+          gh pr list \
+            --repo "$UPSTREAM_REPO" \
+            --author "$PR_AUTHOR" \
+            --state open \
+            --limit 200 \
+            --json number,headRefOid \
+            --jq '.[] | [.number, .headRefOid] | @tsv' |
+          while IFS=$'\t' read -r pr sha; do
+            title="PR #${pr} @ ${sha}"
+
+            if grep -Fxq "$title" "$runs_file"; then
+              echo "Already handled: $title"
+              continue
+            fi
+
+            echo "Dispatching: $title"
+
+            gh workflow run build.yml \
+              --repo "$GITHUB_REPOSITORY" \
+              -f pr="$pr" \
+              -f sha="$sha"
+
+            echo "$title" >> "$runs_file"
+          done
