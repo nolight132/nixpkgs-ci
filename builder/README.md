@@ -30,8 +30,10 @@ git+https://git.nolight.dev/nolight/dotfiles.git#nixosConfigurations.desktop.pkg
 ```
 
 The current uncommitted desktop lock may differ from the published dotfiles.
-Keep the wrapper lock aligned with desktop, or use this wrapper as the desktop's
-Millennium input and make its `nixpkgs` input follow the desktop's `nixpkgs`.
+Use this wrapper as the desktop's Millennium input to keep Millennium and its
+build dependencies on the wrapper's locked nixpkgs. Its overlay exports the
+cached Millennium package while composing the Steam wrapper with the desktop's
+package set. The wrapper's nixpkgs input should remain independently locked.
 
 `INTERVAL_SECONDS` defaults to 900, `NIX_MAX_JOBS` and `NIX_CORES` to 2. The
 container is limited to 4 CPUs and 10 GiB RAM. `/nix` and `/state` are persistent
