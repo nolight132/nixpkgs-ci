@@ -18,10 +18,12 @@ github:nolight132/nixpkgs-ci?dir=flakes/millennium#millennium
 git+https://git.nolight.dev/nolight/dotfiles.git#nixosConfigurations.desktop.pkgs.vicinae
 ```
 
-The default list builds Millennium using the wrapper in `flakes/millennium`.
-Its lock initially matches the desktop's nixpkgs and upstream Millennium inputs.
-Updating that lock is intentional: `--refresh` refreshes remote references but
-never silently updates a flake's locked dependencies.
+The default target packages official prebuilt Millennium releases using the
+flake in `flakes/millennium`. It downloads a versioned archive, verifies its
+SHA-256, patches the 32/64-bit ELF library paths and interpreters, and checks
+dependencies with both loaders. It does not compile Millennium, Node.js, Rust
+or nlohmann_json. `--refresh` refreshes remote references but never silently
+updates a flake's locked dependencies or the pinned binary release.
 
 For an exact match to a committed desktop configuration, use its package directly:
 
@@ -30,10 +32,11 @@ git+https://git.nolight.dev/nolight/dotfiles.git#nixosConfigurations.desktop.pkg
 ```
 
 The current uncommitted desktop lock may differ from the published dotfiles.
-Use this wrapper as the desktop's Millennium input to keep Millennium and its
-build dependencies on the wrapper's locked nixpkgs. Its overlay exports the
-cached Millennium package while composing the Steam wrapper with the desktop's
-package set. The wrapper's nixpkgs input should remain independently locked.
+Use this flake as the desktop's Millennium input to share its cached binary
+package. Its overlay composes the Steam wrapper with the desktop's package set.
+The flake's nixpkgs input should remain independently locked. The Steam profile
+disables Millennium's self-updater, matching the source package's DISTRO_NIX
+behavior; versions are managed by the flake.
 
 `INTERVAL_SECONDS` defaults to 900, `NIX_MAX_JOBS` and `NIX_CORES` to 2. The
 container is limited to 4 CPUs and 10 GiB RAM. `/nix` and `/state` are persistent
@@ -50,10 +53,12 @@ docker compose up -d --build
 docker compose logs -f
 ```
 
-To refresh the wrapper deliberately:
+To refresh runtime libraries deliberately:
 
 ```sh
 nix flake update --flake flakes/millennium
 ```
 
-Commit and push the lock so desktop and builder can consume the same revisions.
+To update Millennium itself, change `version` and the release archive's SHA-256
+in `flakes/millennium/package.nix`. Commit and push so desktop and builder can
+consume the same revisions.

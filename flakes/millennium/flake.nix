@@ -1,32 +1,30 @@
 {
-  description = "Millennium built with nolight's personal nixpkgs";
+  description = "Official Millennium binaries packaged for NixOS";
 
   inputs = {
     nixpkgs.url = "github:nolight132/nixpkgs/personal";
-    millennium = {
-      url = "github:SteamClientHomebrew/Millennium?dir=packages/nix";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
   };
 
-  outputs = { self, nixpkgs, millennium, ... }:
+  outputs =
+    { self, nixpkgs, ... }:
     let
       pkgs = import nixpkgs {
         system = "x86_64-linux";
         config.allowUnfree = true;
-        overlays = [ millennium.overlays.default ];
       };
-    in {
-      # Keep the expensive Millennium build on this flake's locked nixpkgs.
-      # The Steam wrapper can still use the consuming system's package set.
-      overlays.default = final: prev:
-        (millennium.overlays.default final prev) // {
-          millennium = self.packages.${prev.stdenv.hostPlatform.system}.millennium;
-        };
+      millennium = pkgs.callPackage ./package.nix { };
+    in
+    {
+      overlays.default = final: prev: {
+        millennium = self.packages.${prev.stdenv.hostPlatform.system}.millennium;
+        millennium-bin = final.millennium;
+        millennium-steam = final.callPackage ./steam.nix { };
+      };
       packages.x86_64-linux = {
-        inherit (pkgs) millennium millennium-steam;
-        default = pkgs.millennium;
-        nlohmann-json-32 = pkgs.pkgsi686Linux.nlohmann_json;
+        inherit millennium;
+        millennium-bin = millennium;
+        millennium-steam = pkgs.callPackage ./steam.nix { inherit millennium; };
+        default = millennium;
       };
     };
 }
