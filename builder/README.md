@@ -14,12 +14,13 @@ environment variable with write access to `nixpkgs-nolight`.
 Set `FLAKES` to one installable per line, for example:
 
 ```text
-github:nolight132/nixpkgs-ci?dir=flakes/millennium#millennium
+github:nolight132/millennium-nix
 git+https://git.nolight.dev/nolight/dotfiles.git#nixosConfigurations.desktop.pkgs.vicinae
 ```
 
 The default target packages official prebuilt Millennium releases using the
-flake in `flakes/millennium`. It downloads a versioned archive, verifies its
+separate [millennium-nix](https://github.com/nolight132/millennium-nix) repository.
+It downloads a versioned archive, verifies its
 SHA-256, patches the 32/64-bit ELF library paths and interpreters, and checks
 dependencies with both loaders. It does not compile Millennium, Node.js, Rust
 or nlohmann_json. `--refresh` refreshes remote references but never silently
@@ -53,12 +54,6 @@ docker compose up -d --build
 docker compose logs -f
 ```
 
-To refresh runtime libraries deliberately:
-
-```sh
-nix flake update --flake flakes/millennium
-```
-
-To update Millennium itself, change `version` and the release archive's SHA-256
-in `flakes/millennium/package.nix`. Commit and push so desktop and builder can
-consume the same revisions.
+Package definitions and version updates belong in each flake's own repository.
+See [millennium-nix](https://github.com/nolight132/millennium-nix#update) for
+updating Millennium. This repository contains the generic builder and CI only.

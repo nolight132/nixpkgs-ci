@@ -10,7 +10,7 @@ services:
     environment:
       CACHIX_CACHE: nixpkgs-nolight
       CACHIX_AUTH_TOKEN: ${CACHIX_AUTH_TOKEN:?Set a Cachix write token}
-      FLAKES: ${FLAKES:-github:nolight132/nixpkgs-ci?dir=flakes/millennium#millennium}
+      FLAKES: ${FLAKES:-github:nolight132/millennium-nix}
       INTERVAL_SECONDS: ${INTERVAL_SECONDS:-900}
       NIX_MAX_JOBS: ${NIX_MAX_JOBS:-2}
       NIX_CORES: ${NIX_CORES:-2}
