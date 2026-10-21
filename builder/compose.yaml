@@ -1,0 +1,41 @@
+services:
+  nix-builder:
+    build:
+      context: .
+    restart: unless-stopped
+    init: true
+    cpus: 4
+    mem_limit: 10g
+    stop_grace_period: 2m
+    environment:
+      CACHIX_CACHE: nixpkgs-nolight
+      CACHIX_AUTH_TOKEN: ${CACHIX_AUTH_TOKEN:?Set a Cachix write token}
+      FLAKES: ${FLAKES:-github:nolight132/nixpkgs-ci?dir=flakes/millennium#millennium}
+      INTERVAL_SECONDS: ${INTERVAL_SECONDS:-900}
+      NIX_MAX_JOBS: ${NIX_MAX_JOBS:-2}
+      NIX_CORES: ${NIX_CORES:-2}
+      NIX_CONFIG: |
+        experimental-features = nix-command flakes
+        sandbox = false
+        extra-platforms = i686-linux
+        accept-flake-config = false
+        min-free = 10737418240
+        max-free = 21474836480
+    volumes:
+      - nix-store:/nix
+      - builder-state:/state
+    healthcheck:
+      test: ["CMD", "test", "-f", "/state/ready"]
+      interval: 30s
+      timeout: 5s
+      start_period: 5m
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: 20m
+        max-file: "3"
+
+volumes:
+  nix-store:
+  builder-state:
